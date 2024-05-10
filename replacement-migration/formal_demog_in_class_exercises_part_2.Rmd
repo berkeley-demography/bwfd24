@@ -1,0 +1,421 @@
+---
+title: "Formal Demography Workshop: In-Class Exercises on `Replacement Migration' (Part 2)"
+author: "Joshua R. Goldstein and Dennis Feehan"
+output: html_notebook
+---
+
+# Overview of Part 2
+
+Now we're ready to actually try to replicate the UN's _Replacement Migration_
+method for projecting populations with net migration.
+
+Our goals in this part are: 
+
+1. To implement population projections with time-varying Leslie matrices
+
+2. To operationalize the UN's approach to "replacement migration" with one of various _objectives_
+
+
+# Time-varying Leslie matrix projection
+
+We'll implement the UN assumptions abut fertility and mortality from
+1995 to 2050, the time span of the Replacement Migration report. This
+means that our population projection without migration will have the
+form:
+
+$$
+{\bf K}_{t+5} = {\bf A}_t {\bf K}_t,
+$$
+where ${\bf K}$ is a column vector of 5 year age-group counts and
+${\bf A}_t$ is a Leslie matrix built with the period fertility and
+mortality rates specified for time $t$.
+
+Be patient, please. We'll look at how to include migration in a bit :)
+
+## Implementation
+
+Our approach will be to use some pre-built functions that I (Josh) wrote up.
+
+```{r}
+leslie <- function(x= seq(0, 100, 5), nFx, nLx)
+{
+    ## defaults to 5 year age groups
+    if(length(nFx) != length(x))
+        cat("nFx wrong length\n")
+    if(length(nLx) != length(x))
+        cat("nLx wrong length\n")
+
+    ## define next age group
+    nFxpn = c(nFx[-1], 0)
+    nLxpn = c(nLx[-1], 0)
+
+    ## build leslie matrix (0.4886 is proportion female at birth)
+    firstrow = (nLx[1]/2) * (nFx + nFxpn * nLxpn/nLx) * 0.4886
+    subdi = nLxpn/nLx
+
+    ## put subdi and firstrow together
+    subdi.mat <- diag(subdi[-length(subdi)])
+    A <- rbind(firstrow, cbind(subdi.mat,0))
+
+    ## print out intrinsic rate of natural increase "r"
+    ## as a check
+    lambda = Re(eigen(A)$val[1])
+    r = log(lambda)/5
+    cat("r = ")
+    cat(round(r,4))
+    cat("\n")
+    return(A)
+}
+
+leslie_for_period <- function(period, nFxt, nLxt)
+{
+    ## this indexes the matrices with the particular period
+    ## and fixes the age groups for nFx and nLX
+    ## usage: 
+    ##.   A_2015 <- leslie_for_period(2015, nFxt = nFxt, nLxt = nLxt)
+    x = seq(0, 100, 5)
+    ##
+    nFx_raw = nFxt[,paste(period)]
+    nFx = c(rep(0, 2), nFx_raw, rep(0, 10)) ## fill out to all ages
+    names(nFx) <- x
+    ##
+    nLx_raw = nLxt[,paste(period)]
+    ## x_mort = c(0, 1, seq(5, 100, 5))
+    nLx = c(sum(nLx_raw[1:2]), nLx_raw[-(1:2)]) ## collapse childhood to 0-4
+    names(nLx) <- x
+
+    A <- leslie(x = x, nFx, nLx)
+    return(A)
+}
+```
+
+## Testing on Italy
+
+Re-read in the data and format it
+```{r}
+## nFxt
+my_location = "Italy"
+dt <- fread("./nFx.csv")
+mydt <- dt[Location == my_location]
+nFxt <- mydt[, xtabs(nFx ~ x + t)]
+## nLxt
+dt <- fread("./nLx.csv")
+mydt <- dt[Location == my_location]
+nLxt <- mydt[, xtabs(nLx ~ x + t)]
+## nKxt
+dt <- fread("./nKx.csv")
+mydt <- dt[Location == my_location]
+nKxt <- mydt[, xtabs(nKx ~ x + t)]
+```
+
+Project Italy without migration from 1995 to 2050
+```{r}
+## initialization
+x = seq(0, 100, 5)
+t = seq(1995, 2050, 5)
+nKxt_hat <- matrix(NA, length(x), length(t)) ## "hat" means projected
+dimnames(nKxt_hat) <- list(x,t)
+nKxt_hat[,"1995"] <- nKxt[,"1995"] ## starting pop is observed 1995
+
+for (i in 1:(length(t)-1)) ## last period starts in 2045
+{
+	cat(paste("t = ", t[i], " ")) ## for nicer output with dates ...
+	## get period specific leslie matrix
+    At = leslie_for_period(period = t[i], nFxt=nFxt, nLxt = nLxt)
+    ##
+    ## project 1 time step ahead
+    nKxt_hat[,i+1] <- At %*% nKxt_hat[,i]
+}
+```
+
+Notice the intrinsic growth rates of the matrices. Are they varying?
+Are they positive or negative? Are they growing or shrinking? Is this
+consistent with the fertility forecast we saw in Part 1?
+
+
+Let's look at total pop size and compare it to the medium forecast
+```{r}
+Kt_hat = colSums(nKxt_hat) ## what we projected w/o migration
+Kt_medium = colSums(nKxt) ##  what UN projected w/ a bit of migration
+
+plot(names(Kt_medium), Kt_medium/million, ylim = range(Kt_medium)*c(.9, 1.1)/million, ylab = "millions",
+     xlab = "period", main = paste(my_location, "projected population sizes"))
+lines(names(Kt_hat), Kt_hat/million, lwd = 3, col = 'red')
+legend("topright", legend = c("UN Medium (w/migration)", "Our projection (w/o migration)"),
+       col = c("black", "red"), pch = c(1, -1), lty = c(-1, 1))
+```
+
+We see that medium projection is quite a bit higher --- presumbably
+because it already includes some net immigration.
+
+# Replacement migration
+
+Now we're ready to include migration. The UN's approach is to add in
+migrants at every time step whenever they are needed in order to meet
+the specified "objective". The objectives range from keeping total
+population size constant (scenario 2) to keeping the
+old-age-support-ratio constant (scenario 5). (You should check to see
+if I got the scenario numbers correct, and also to see what the other
+scenarios are.)
+
+The mathematical form of the projection is now
+
+$$
+{\bf K}_{t+5} = {\bf A}_t {\bf K}_t + {\bf G}_t,
+$$
+
+where ${\bf G}_t$ is a column vector of the counts of immigrants at
+each age needed to meet the "objective" at time $t+5$.
+
+A further restriction is that the age structure of net immigration is
+assumed to be known and fixed as the average of net migration
+schedules in the US, Canada, and Australia. Here is the schedule
+copied from the report
+
+```{r}
+ngx = c(8.63, 9.26, 8.30, 8.31, 12.25, 16.65, 12.06,
+        7.68, 4.51, 2.76, 2.40, 2.25, 2.05, 1.55, 0.77, 0.56, 0.02, ## thru 85
+        0, 0, 0, 0)/100 ## padded zeros
+names(ngx) <- x
+sum(ngx)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+barplot(ngx, horiz=TRUE, col = "blue", 
+        xlab = "Proportion",
+        main = "Net migration age schedule")
+ncx <- nKxt[,"1995"]/sum(nKxt[,"1995"])
+barplot(ncx, horiz = TRUE, col="red",
+        main = "Age distribution\nof initial population",
+        xlab = 'Proportion')
+```
+
+
+
+You can see that $ngx$ sums to 1.0, and so we can multiply it by the number of net immigrants to get the vector ${\bf G}$.
+
+The logic of each projection step is 
+
+1. Project 1-step without migration
+
+2. Calculate how many net migrants during that 1-step are needed to
+   meet objective
+
+3. Add that number to the projected population without migration
+
+4. Iterate the above steps, keeping track of total population by age
+   and by total immigrants by age.
+
+There's one additional twist. The UN objectives involve keeping some
+quantity constant, but in some cases the quantity "improves" for some
+time before getting "worse". In this case, the UN doesn't start
+migration until things threaten to get worse -- that is, they try to
+keep things constant after they reach the "best" state. This means
+that there's an additional step of checking whether things are
+"getting worse" before checking on how many migrants are needed. (This
+will turn out to produce some hard-to-interpret results in some
+special cases.)
+
+## Implementation in R
+
+Our objective will be to keep the OASR constant, so it's useful to have a function that turns a vector of age counts into this ratio
+```{r}
+get_old_age_support_ratio <- function(nKx, x = seq(0, 100, 5))
+{
+    working = sum(nKx[x %in% 15:64])
+    old = sum(nKx[x >= 65])
+    young = sum(nKx[x < 15])
+    oasr = working / old
+    return(oasr)
+}
+```
+
+Our function that calculates how many migrants are needed is
+
+```{r}
+
+## Note: bad news is the code here is rather difficult to
+##   understand. good news is that it is fairly generic and you should
+##   be able to use without understanding.
+
+get_migrants <- function(summary_function, 
+                         nKx_target, 
+                         nKx_nomig,
+                         migration_schedule)
+{
+    ## usage: get_migrants(summary_function = get_old_age_support_ratio,
+    ##                    nKx_target = nKxt_hat[,i],
+    ##                    nKx_nomig = nKx_nomig,
+    ##                    migration_schedule = ngx)
+    # this function returns the counts of migrants that would be
+    ## needed that would keep some objective constant
+
+    ## if this_value is not "worse" than previous value, return 0 migrants
+    target_value <- summary_function(nKx_target)
+    this_value <- summary_function(nKx_nomig)
+    if(this_value >= target_value)
+    {
+        ## no migration
+        mig_x = rep(0, length(migration_schedule))
+    }
+    if(this_value < target_value)
+    {
+        ## yes, migration 
+        f <- function(theta, nKx_target, nKx_nomig)
+        {
+          ## a function that calculates how different summary values are 
+          ## with some number of migrants and the ideal of the target
+            summary_function(nKx_target) - summary_function(nKx_nomig + theta * migration_schedule)
+        }
+        million = 10^6
+        billion = 1000*million
+        ## now we find the count of immigrants "theta" that maintains target.
+        ## f() returns 0 when we have the right number.
+        ## uniroot() search across theta from 1 to 10 billion and finds theta that makes f() == 0
+        out = uniroot(f = f, nKx_target = nKx_target, nKx_nomig = nKx_nomig,
+                      interval = c(1, 10*billion))
+        number_of_migrants = out$root
+        mig_x = number_of_migrants * migration_schedule  ## vector of counts by age
+    }
+    return(mig_x)
+}
+```
+
+Now let's do the projection replacement migration
+
+```{r}
+## initialization
+x = seq(0, 100, 5)
+t = seq(1995, 2050, 5)
+nKxt_hat <- matrix(0, length(x), length(t)) ## "hat" means projected
+dimnames(nKxt_hat) <- list(x,t)
+nKxt_mig_only <- nGxt <- nKxt_hat ## initialize as 0s
+nKxt_hat[,"1995"] <- nKxt[,"1995"] ## initialize starting pop with observed in 1995
+for (i in 1:(length(t)-1)) ## last projection period starts in 2045, not 2050
+{
+    ## get period specific leslie matrix
+    At = leslie_for_period(period = t[i], nFxt=nFxt, nLxt = nLxt)
+    ##
+    ## project 1 time step ahead without migrants
+    nKx_nomig <- At %*% nKxt_hat[,i]
+    ##
+    mig_x = get_migrants(summary_function = get_old_age_support_ratio,
+                         nKx_target = nKxt_hat[,i],
+                         nKx_nomig = nKx_nomig,
+                         migration_schedule = ngx)
+    nKxt_hat[,i+1] = nKx_nomig + mig_x
+    nGxt[,i] <- mig_x
+    ## also keep track of migrant pop and descendants for graph
+    nKxt_mig_only[,i+1] = At %*% nKxt_mig_only[,i] + mig_x ## + nGxt[,i]
+}
+
+## let's check to make sure we're meeting the objective by seeing if
+## in this case the old age support ratio stays constant
+objective_test = apply(nKxt_hat, 2, get_old_age_support_ratio)
+print(cbind(objective_test))
+```
+
+Looks good! We've kept (in the case of Italy) the old-age-support
+ratio at a value of 4.09
+
+Now let's visualize our results by looking at the age-pyramids,
+separated by the descendants of "natives" (as of 1995) and the
+descendants of immigrants (post 1995).
+
+```{r, }
+nKxt_native_only = nKxt_hat - nKxt_mig_only
+my_t.vec <- t
+par(mfrow = c(4,3), mar = c(2,2,1,1))
+## par(mfrow = c(1,1))
+for (i in 1:length(my_t.vec))
+{
+    my_t = paste(my_t.vec[i])
+    barplot(nKxt_hat[,my_t]/million, horiz = T, col = "white", xlab = "millions")
+    barplot(nKxt_native_only[,my_t]/million, col = "black", horiz = T, add = T)
+    Kt = sum(nKxt_hat[,my_t])
+    title(paste(my_location, my_t, "\n", round(Kt/million), "million"),
+          cex.main = .7)
+}
+```
+
+The age-pyramid in "black" is the descendants of the population
+present in Italy in 1995 and the population in "white" is the
+descendants of the population of migrants (including the migrants
+themselves) arriving after 1995.
+
+Also, note, the x-axis is changing and that the size of the population
+is increasing a lot, quadrupling from 1995-2050.
+
+## Immigration totals
+
+We know produce a table like the UN did, with migrants each period and
+annual migration, along with the total
+
+```{r}
+Gt_per_5_years = colSums(nGxt)/million
+Gt_per_year = Gt_per_5_years/5
+G_total = sum(Gt_per_5_years)
+Kt = colSums(nKxt_hat)/million
+net_migration_rate = Gt_per_year/Kt
+print('note: these totals are millions of migrants')
+cbind(Gt_per_5_years = round(Gt_per_5_years,1),
+      Gt_per_year = round(Gt_per_year, 1),
+      net_migration_rate = round(net_migration_rate, 3))
+print("total millions from 1995-1950")
+print(G_total)
+```
+
+We can see that the net migration rate is something on the order of
+2% of the total population. Big but not implausible.
+
+We could compare this to an approximation of the crude birth rate that
+we obtain by dividing the youngest age-group by 5 to get the
+approximate number of births. (Note: the youngest age-group also
+contains some immigrants, but these are also included in the
+denominator of the population, so might not be that much of an issue.)
+
+```{r}
+Bt_approx = (nKxt_hat["0",]/5)/million
+crude_birth_rate_approx = Bt_approx/Kt
+cbind(net_migration_rate = round(net_migration_rate, 3),
+   	 crude_birth_rate_approx = round(crude_birth_rate_approx, 3))
+```
+
+So, in Italy, "replacement migration" to keep the old-age-support
+ratio constant at 4.1 workers per elderly person would imply annual
+net immigration at about 2 to 4 times the rate of births.
+
+# Exercises
+
+1. Repeat the replacement migration estimates that we just did for Italy, this time using "Republic of Korea."
+
+* What is the level of old-age support ratio that is being maintained?
+
+* How many total migrants are needed? 
+
+* How much would the South Korean population grow?
+
+* What would be the annual crude migration rate?
+
+* What would you say is the main reason that so many migrants are needed?
+
+2. What would be some other "objectives" to implement? Look up the UN
+replacement migration scenarios -- and make up a new one yourself?
+
+(You don't have to do any coding for now. We'll try that later)
+
+3. What do you think would happen in South Korea if we kept the
+old-age support ratio constant at its 2020 levels (instead of 1995)?
+Would this imply higher or lower rates of "replacement migration"?
+
+(You might want to plot the age-pyramids of the UN projection
+"nKxt" for 1995 and 2025 to inform you answer).
+(But you can also do this without coding  -- just give your reasoned guess.)
+
+
+# Congratulations!
+
+> You've finished the 2nd part of our "Replacement Migration" exercise.
+> The last part is to change some of the assumptions and see how much the results change.

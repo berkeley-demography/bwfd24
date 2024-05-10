@@ -1,0 +1,335 @@
+---
+title: "Formal Demography Workshop: In-Class Exercises on `Replacement Migration' (Part 3)"
+author: "Joshua R. Goldstein and Dennis Feehan"
+output: html_notebook
+---
+
+
+# Overview of Part 3
+
+Here we experiment with some alterative objectives and assumptions to
+see how this influences "replacement migration". We also provide
+details for your team project.
+
+
+Our goals are: 
+
+1. To see if there was something special about 1995 that affected our
+estimates. We'll do this by trying to maintain the old-age support
+ratio observed in 2020 rather than 1995.
+
+2. To change the objective to keeping the size of the working
+population constant. This is on of the UN's scenarios. This will also
+allow us to see how to code our own, customized objective.
+
+3. To provide instructions for the team mini-project.
+
+# Changing the starting state that is the target of "replacement"
+
+Recall from Part 1 that the old age support ratio from Italy in 1995
+was largely influenced by fertility that occurred many decades
+earlier.
+
+If we shift our sights a bit, and instead try to maintain the old-age
+support ratio seen today (in 2020), then the level might be lower and
+it might be easier to maintain.
+
+We'll implement this change by starting our projection with the 2020
+population age structure, but for comparability -- and easy of coding
+-- we'll use the same fertility and mortality rates from 1995 to 2050
+to do our projection. This will make all of the differences we find
+attributable to the starting age structure -- and not to differences
+in fertility or mortality.
+
+We can re-cycle our earlier code with one change, which I comment
+below.
+
+```{r}
+## initialization
+x = seq(0, 100, 5)
+t = seq(1995, 2050, 5)
+nKxt_hat <- matrix(0, length(x), length(t)) ## "hat" means projected
+dimnames(nKxt_hat) <- list(x,t)
+nKxt_mig_only <- nGxt <- nKxt_hat ## initialize as 0s
+nKxt_hat[,"1995"] <- nKxt[,"2020"] ## <<<--- we changed initial population to have 2020 age-structure
+## projection
+for (i in 1:(length(t)-1)) ## last projection period starts in 2045, not 2050
+{
+    ## get period specific leslie matrix
+    At = leslie_for_period(period = t[i], nFxt=nFxt, nLxt = nLxt)
+    ##
+    ## project 1 time step ahead without migrants
+    nKx_nomig <- At %*% nKxt_hat[,i]
+    ##
+	 	   mig_x = get_migrants(summary_function = get_old_age_support_ratio,
+                         nKx_target = nKxt_hat[,i],
+                         nKx_nomig = nKx_nomig,
+                         migration_schedule = ngx)
+    nKxt_hat[,i+1] = nKx_nomig + mig_x
+    nGxt[,i] <- mig_x
+    ## also keep track of migrant pop and descendants for graph
+    nKxt_mig_only[,i+1] = At %*% nKxt_mig_only[,i] + mig_x ## + nGxt[,i]
+}
+```
+
+Let's see what level of the old-age support ratio we are maintaining
+
+```{r}
+## let's check to make sure we're meeting the objective by seeing if
+## in this case the old age support ratio stays constant
+objective_test = apply(nKxt_hat, 2, get_old_age_support_ratio)
+print(cbind(objective_test))
+```
+
+We can see that it constant at about 2.7, after 2025, but strangely it
+was constant at a slightly higher level before 2025. This probably has
+something to do with the dynamics over time as the rather irregular
+age-pyramid ages. During the projection there is a actually a year
+when the OASR went up ("2020") and there was zero migration.
+
+```{r, }
+nKxt_native_only = nKxt_hat - nKxt_mig_only
+my_t.vec <- t
+par(mfrow = c(4,3), mar = c(2,2,1,1))
+## par(mfrow = c(1,1))
+for (i in 1:length(my_t.vec))
+{
+    my_t = paste(my_t.vec[i])
+    barplot(nKxt_hat[,my_t]/million, horiz = T, col = "white", xlab = "millions")
+    barplot(nKxt_native_only[,my_t]/million, col = "black", horiz = T, add = T)
+    Kt = sum(nKxt_hat[,my_t])
+    title(paste(my_location, my_t, "\n", round(Kt/million), "million"),
+          cex.main = .7)
+}
+```
+
+Compare to the projections we did early trying to The age-pyramid in
+"black" is the descendants of the population present in Italy in 1995
+and the population in "white" is the descendants of the population of
+migrants (including the migrants themselves) arriving after 1995.
+
+Rather than quadrupling the population does not quite double by 2050. 
+
+## Immigration totals
+
+
+```{r}
+Gt_per_5_years = colSums(nGxt)/million
+Gt_per_year = Gt_per_5_years/5
+G_total = sum(Gt_per_5_years)
+Kt = colSums(nKxt_hat)/million
+net_migration_rate = Gt_per_year/Kt
+print('note: these totals are millions of migrants')
+cbind(Gt_per_5_years = round(Gt_per_5_years,1),
+      Gt_per_year = round(Gt_per_year, 1),
+      net_migration_rate = round(net_migration_rate, 3))
+print("total millions from 1995-1950")
+print(G_total)
+```
+
+We see that the replacement migration algorithm produces two separate
+waves of migration, but that the total number of migrants (about 62.5
+million is about half the size of what we saw earlier, starting with
+the 1995 age-structure.)
+
+
+
+# 2. Changing the objective
+
+Here we'll implement another of the UN's scenarios, this time bringing
+in enough migrants to maintain the "working" population aged 15 to 64.
+
+We begin by writing a function that converts a vector of age-group
+counts to the total number of workers
+
+```{r}
+get_workers <- function(nKx, x = seq(0,100, 5) )
+{
+  workers = sum(nKx[x %in% 15:64])
+  return(workers)
+}
+```
+
+Now we can use the same code as before, just changing the argument
+summary_function in get_migrants().
+
+```{r}
+## initialization
+x = seq(0, 100, 5)
+t = seq(1995, 2050, 5)
+nKxt_hat <- matrix(0, length(x), length(t)) ## "hat" means projected
+dimnames(nKxt_hat) <- list(x,t)
+nKxt_mig_only <- nGxt <- nKxt_hat ## initialize as 0s
+nKxt_hat[,"1995"] <- nKxt[,"1995"] ## initialize starting pop with observed in 1995
+for (i in 1:(length(t)-1)) ## last projection period starts in 2045, not 2050
+{
+    ## get period specific leslie matrix
+    At = leslie_for_period(period = t[i], nFxt=nFxt, nLxt = nLxt)
+    ##
+    ## project 1 time step ahead without migrants
+    nKx_nomig <- At %*% nKxt_hat[,i]
+    ##
+	## 	   mig_x = get_migrants(summary_function = get_old_age_support_ratio,
+    mig_x = get_migrants(summary_function = get_workers, ## <<<--- we changed summary_function
+                         nKx_target = nKxt_hat[,i],
+                         nKx_nomig = nKx_nomig,
+                         migration_schedule = ngx)
+    nKxt_hat[,i+1] = nKx_nomig + mig_x
+    nGxt[,i] <- mig_x
+    ## also keep track of migrant pop and descendants for graph
+    nKxt_mig_only[,i+1] = At %*% nKxt_mig_only[,i] + mig_x ## + nGxt[,i]
+}
+```
+
+```{r}
+## let's check to make sure we're meeting the objective by seeing if
+## in this case the old age support ratio stays constant
+objective_test = apply(nKxt_hat, 2, get_workers)/million
+print(cbind(objective_test))
+```
+Looks good! We've kept (in the case of Italy) the number of working age people at about 39 million.
+
+Now let's visualize our results by looking at the age-pyramids,
+separated by the descendants of "natives" (as of 1995) and the
+descendants of immigrants (post 1995).
+
+```{r}
+nKxt_native_only = nKxt_hat - nKxt_mig_only
+my_t.vec <- t
+par(mfrow = c(4,3), mar = c(2,2,1,1))
+## par(mfrow = c(1,1))
+for (i in 1:length(my_t.vec))
+{
+    my_t = paste(my_t.vec[i])
+    barplot(nKxt_hat[,my_t]/million, horiz = T, col = "white", xlab = "millions")
+    barplot(nKxt_native_only[,my_t]/million, col = "black", horiz = T, add = T)
+    Kt = sum(nKxt_hat[,my_t])
+    title(paste(my_location, my_t, "\n", round(Kt/million), "million"),
+          cex.main = .7)
+}
+```
+
+Note: now the population only grows slightly, from 57 to 68 million
+over 55 years.
+
+## Immigration totals
+
+We know produce a table like the UN did, with migrants each period and
+annual migration, along with the total
+
+```{r}
+Gt_per_5_years = colSums(nGxt)/million
+Gt_per_year = Gt_per_5_years/5
+G_total = sum(Gt_per_5_years)
+Kt = colSums(nKxt_hat)/million
+net_migration_rate = Gt_per_year/Kt
+print('note: these totals are millions of migrants')
+cbind(Gt_per_5_years = round(Gt_per_5_years,1),
+      Gt_per_year = round(Gt_per_year, 1),
+      net_migration_rate = round(net_migration_rate, 3))
+print("total millions from 1995-1950")
+print(G_total)
+```
+And the number of migrants is only 20 million over the entire period.
+
+# Discussion Questions
+
+1. Why does "replacement migration" require so many fewer immigrants
+when we start with 2020 Italy than when we started with 1995 Italy?
+
+2. Why does changing the objective function to the number of working
+age adults also seem to require so many fewer immigrants to maintain?
+
+3. Would the later target date (2020 instead of 1995) result in lower
+required "replacement migration" for all populations? If you think
+not, what would be a convincing counter-example?
+
+4. Why didn't we try the total dependency ratio [workers : (old +
+young)]?
+
+5. Is the UN using the term "replacement migration" in the way you
+thought of it before? Would it be better to call it "maintenance
+migration" because it's keeping something constant? In a broader
+sense, does bringing in a lot of migrants involve keeping the status
+quo?
+
+6. Does the critique that we (perhaps) voiced in answering Q5 lead us
+to think of other alternative ways to define "replacement migration"
+or to measure the quantity that bringing in migrants is supposed to
+maintain?
+
+
+# 3. Instructions for the team mini-project
+
+A. We will allocate two countries to each team. Each team will then
+calculate (i) the total number of migrants and (ii) the net migration
+rate (in 2030) that are required to keep the old-age support ratio
+constant at its 1995 level. Next, each team will recalculate again
+using the 2025 starting pouplation, just as we did above for Italy. On
+Thursday, we'll combine all these numbers when we meet again to get a
+better understanding of how starting age-structure influences the
+"replacement migration" rates. Each group should construct tables for
+each that looks like this
+
+         
+Country "1 of 2"
+                      Total migrants        nmr(2030)
+                      1995-2050
+                      (millions)
+1995 pop start              A                  B
+2025 pop start              C                  D
+
+where you fill in the quantities A,B,C, and D -- and you do again for
+your second country.
+
+B. Each team should come up with its own objective function and
+implement this to see how it affects the number of replacement
+migrants needed.
+
+Note 1: for ease of implementation with our existing code, it is best
+if this function can be calculated based on period age-structure --
+that is, if it does not depend on the age-structure or other
+quantities in future or past periods.
+
+Note 2: if the summary statistic/quantity you are calculating is such
+that less is better (e.g., you want to prevent excessive aging based
+on a measure like the mean age) then you will want your objective
+function to return -1 times our outcome in order for the existing code
+to work correctly.
+
+Some possibilities might include
+
+* the fraction of the entire population that is over age 65
+
+* the number of children (under age 15) in the population
+
+* anything else you want to try!
+
+Please report the same summary statistics as in part A. 
+
+I would recommend you try applying your new objective to Italy (which
+we're all now familiar with) and to at least one other country that
+you find interesting (easiest might be one of the countries we assigned.).
+
+Your result can look like this:
+
+Country "Italy"
+                      Total migrants        nmr(2030)
+                      1995-2050
+                      (millions)
+Benchmark 
+(1995 pop start,
+OASR objective)             A                  B
+Your new objective
+(1995 pop start)            C                  D
+
+and the same for a country of your choosing. 
+
+
+# Congratulations!
+
+> You've finished all the content we have prepared for you! If you are
+>  reading this before you have started your group project, then
+>  congratulations on getting this far -- and good luck working with
+>  your group. If you're only seeing this at the end of your group
+>  project, then an even bigger congratulations: you're done!

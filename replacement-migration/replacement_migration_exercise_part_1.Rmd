@@ -1,0 +1,330 @@
+---
+title: "Formal Demography Workshop: In-Class Exercises on `Replacement Migration'"
+author: "Joshua R. Goldstein and Dennis Feehan"
+output: html_notebook
+---
+
+
+# Overview
+
+The UN issued an influential report on _Replacement Migration_ in
+2000, concluding that
+
+> Maintaining potential support ratios at current levels through
+>  replacement migration alone seems out of reach, because of the
+>  extraordinarily large numbers of migrants that would be required.
+
+For South Korea, the report contains the following astounding conclusion:
+
+> The number of immigrants needed to maintain the potential support
+>  ratio at its 1995 level (scenario V) is 110 times the size of the
+>  current national population, and equal approximately to the current
+>  total population of the world.
+
+The goals of our project this year is to revisit this report. Along the way, we will:
+
+1. Use stable population theory (without migration) to understand the
+properties and implications for the future of currently observed
+population pyramids.
+
+2. Understand the UN's definition of "replacement migration" and to
+produce estimates based on this definition.
+
+
+3. Measure how sensitive the UN's estimates are to the starting date
+of the projection.
+
+4. Allow your team to specify your own population-related goal and to
+estimate how much migration would be needed to satisfy that.
+
+# Organizational Structure
+
+* This document ("part 1") is about the data and starting age
+  structure of the UN's _Replacement Migration_ report.  You should
+  read through Part 1 before the workshop -- and you should also try
+  running all of the code (and take a first pass at understanding
+  it). We will review this whole document as part of the workshop on
+  Wednesday.
+
+* The next document ("part 2") implements the UN's replacmenent
+  migration "algorithm". It tries to replicate the results of this report for Italy.
+
+* Finally, the last document ("part 3") shows what happens if vary
+  some of the assumptions of the UN's approach and provides a
+  description of your the you will do for Thursday morning in small teams.
+
+
+# Our data "ingredients"
+
+We use the UN's schedules of fertility, mortality, and
+migration. We're using files from 2022 rather than those from the
+Replacement Migration report, because the newer releases contain
+complete age-specific schedules of fertility and mortality for all
+years.
+
+The format of the files is as a data.frame (or equivalently a
+data.table) with all of the ages and years and countries in a single
+file. Our approach will be to work with one country at a time,
+organizing the rates into a Lexis-surface-like age x period table.
+
+For our in-class example, we'll look at Italy. For your teamwork,
+later on, you can feel free to use other countries, including the
+extreme example of South Korea.
+
+
+## Vital Rates
+
+Here we'll use the data.table package to read in the .csv files. Then
+we'll create matrices of age-by-period rates.
+
+### Fertility
+
+```{r}
+library(data.table) ## the package we use to read in and restructure the data
+dt <- fread("./nFx.csv") ## we'll use the name "dt" as a placeholder
+## restrict to one country
+my_location = "Italy" ## you can change this to do a different country
+mydt <- dt[Location == my_location] ## restricts data to this country
+head(mydt) ## to see the structure of the raw data
+ ## finally we create a matrix using the xtabs() functions with formula interface
+nFxt <- mydt[, xtabs(nFx ~ x + t)] ## produces a table with rows age x and columns period t.
+print(nFxt[1:5, 1:5])
+```
+
+You should see a table of age-specific fertility rates in 5 year age
+groups and 1 year periods.
+
+To check to see if this makes sense and is working right, let's
+calculate the period Total Fertility Rate and see what's happened to
+it in Italy and what is projected.
+
+The definition of the TFR is the sum of the age specific rates. Since we have $n=5$ years, we multiply by $n$ to get the right number of person-years of exposure.
+
+Here's the formula:
+$$
+TFR(t) = \sum_{x = 15}^{x = 45} nFx(t) * n
+$$
+
+And in "R", 
+```{r}
+TFR_t = colSums(nFxt)*5
+```
+Plotting fertility over time,
+```{r}
+plot(names(TFR_t), TFR_t, type = 'o', col = "blue", ylim = c(0, 3))
+grid()
+abline(v = 1995)
+text(x = 1995, y = 2.5, "Replacement migration\n scenarios start\n in 1995", pos = 4)
+```
+
+We can see that Italy has a history of sub-replacement fertility, with
+the TFR falling below 2 in about 1980. The UN forecasts predict the
+TFR will rise slowly to 1.5 over the long-term.
+
+# Mortality / Survival
+
+For mortality and survival we'll focus on the the person-years lived
+$nLx$ column of the lifetable, as this is all we'll need for
+projection.
+
+```{r}
+## we repeat what we did for fertility nFx with mortality nLx
+library(data.table)
+##
+dt <- fread("./nLx.csv") ## we'll use the name "dt" as a placeholder
+## restrict to one country
+mydt <- dt[Location == my_location]
+head(mydt)
+##
+## and finally we'll create a matrix using the xtabs() functions with formula interface
+nLxt <- mydt[, xtabs(nLx ~ x + t)] ## produces a table with rows age x and columns period t.
+##
+print(nLxt[1:5, 1:5])
+```
+
+(Note: the beginning age groups start out at 0-1, and 1-5. Our code
+for making projection matrices will combine these groups to be 0-5.)
+
+How could we calculate life expectancy easily from this matrix in
+order to check the data? Hint: try the colSums() function.
+
+# Age structure
+
+Our files for age-structure include the entire history and the 2022
+projections. (We read all of these in --  but for our analysis
+we'll just use the starting population in the period we're interested
+in and do the projection ourselves.)
+
+```{r}
+library(data.table)
+dt <- fread("./nKx.csv") ## we'll use the name "dt" as a placeholder
+## restrict to one country
+mydt <- dt[Location == my_location]
+head(mydt)
+## and finally we'll create a matrix using the xtabs() functions with formula interface
+nKxt <- mydt[, xtabs(nKx ~ x + t)] ## produces a table with rows age x and columns period t.
+print(nKxt[1:5, 1:5])
+```
+
+Let's check the units by looking at total population size. Italy
+should have something like 60 million people in 2020.
+
+```{r}
+Kt = colSums(nKxt)
+million = 10^6
+plot(names(Kt), Kt/million, col = "green")
+title(paste(my_location, "population size"))
+```
+
+Looks like we have the right units, right?
+
+# Analysis of starting age-structure
+
+The UN's approach to replacement migraiton is to calculate the number
+of immigrants that are needed in order to keep some aspect of the
+population constant. They get the most dramatic results when the try
+to keep the age-structure at working and older ages constant (as we'll
+see in Part 2 of our exercise.
+
+But before we get to replacement migration, let's start by look at
+age-structure of the 1995 population that the UN report is trying to
+keep constant.
+
+Our population is  both sexes, but can still plot it as a kind of 'half-pyramid':
+
+```{r}
+nKx_zero = nKxt[,"1995"]/million
+barplot(nKx_zero, horiz = T, xlab = "pop in millions", ylab = "age")
+title(paste(my_location, "age-structure in 1995"))
+```
+
+Does this look like a stable population? Hard to say. It has shrinking
+cohort sizes below about age 30, so it could be close to the stable
+age-structure of a shrinking population. But the history of higher
+fertility in the not-so-distant past might mean that there are
+relatively few older people. Remember that fertility rates in the
+1950s and 1960s were a lot higher than more recently.
+
+The UN uses the "potential old-age support ratio" (OASR) as a measure
+of age-structure. This is the ratio of potential workers per elderly
+person, wich they define as the number aged 15-64 per person aged 65+.
+
+Let's calculate the OASR for this population
+```{r}
+get_old_age_support_ratio <- function(nKx, x = seq(0,100, 5)) 
+{
+  workers = sum(nKx[x %in% 15:64])
+  old = sum(nKx[x > 64])
+  young = sum(nKx[x < 15])
+  oasr = workers/old
+  return(oasr)
+}
+
+oasr_zero = get_old_age_support_ratio(nKx_zero) # we're using "zero" to denote our starting population
+print(oasr_zero)
+```
+  
+So there are about 4 people of working age per person over age 65.
+
+How does this compare to a stable population? The answer depends on
+how we phrase the question. One way to answer this is to see what
+constant fertility rate is required to have the same old-age support ratio as
+observed, given some constant survival schedule. Let's try this using the
+period survival schedule of 1995.
+
+```{r}
+## get the nLx's for 1995, with 5 year age groups for all groups.
+nLx_raw = nLxt[,"1995"] 
+nLx = c(sum(nLx_raw[1:2]), nLx_raw[-(1:2)]) ## this combines the 0- and 1-4 age groups.
+```
+
+Our stable age-structure formula (as you will study in days 1 and 2 of the workshop) is
+$$
+nCx = b * nLx * exp(-x * r),
+$$
+where 
+* $b$ is the stable birth rate
+* $nLx$ is the person-years lived aged x to x+n
+* $r$ is the intrinsic rate of natural increase.
+
+Let's find the growth "r" which gives us the an old-age support ratio
+of about 4.1. We'll do this by "search", calculating OASR for a
+range of values of "r".
+
+```{r}
+r.vec = seq(-.02, .03, .001)
+oasr.vec <- NULL
+x = seq(0, 100, 5)
+for (i in 1:length(r.vec))
+{
+  this_r = r.vec[i]
+  this_oasr = get_old_age_support_ratio(nLx * exp(-x*this_r))
+  ## note: we can leave out b for the ratio because it cancels in the numerator and denominator
+  oasr.vec[i] = this_oasr ## save result
+}  
+print(cbind(r.vec, oasr.vec))
+```
+
+So it looks like a stable growth rate $r$ of about 0.7 percent would
+produce the same old-age support ratio over the long-term as we
+observe in 1995.
+
+The usual approximation of the growth rate from the TFR is
+
+$$
+r \approx \log (TFR * proportionFemale) / generationLength
+$$
+
+Inverting this, gives
+
+$$
+TFR \approx {\exp(r*generationLength) \over proportionFemale}
+$$
+
+```{r}
+my_r = 0.7/100
+my_generation = 30
+my_prop_female = 0.4886
+my_approx_TFR = exp(my_r * my_generation)/ my_prop_female
+print(my_approx_TFR)
+```
+
+So it looks like we would need a TFR quite close to what was actually
+observed in the 1950s or so.
+
+# First set of exercises
+
+Repeat our above analysis for "South Korea" and answer the following
+questions.
+
+(Hint: Do this by changing the variable "my_location" to "Republic of
+Korea")
+
+1. How would you describe the history of fertility in South Korea?
+a) just like in Italy
+b) higher fertility in past and lower fertility today, compared to Italy
+c) lower fertility always than Italy
+
+3. What is Korea's old-age support ratio in 1995. How does it compare
+to Italy's at the same time?
+
+4. What stable growth rate (and TFR) would be needed to keep that the
+old-age support ratio constant at the level of South Korea in 1995
+(with 1995 survival rates)?
+
+5. How does this level of TFR (needed to maintain the 1995 old-age
+support ratio) compare to South Korea's historical experience?
+
+6. Why would demographers say that South Korea in 1995 is in the midst
+of its "demographic dividend"? (Hint: look at the age-pyramid).
+
+> Congratulations! You've reached the end of our first notebook, and
+>  the end of our first set of exercises.
+
+
+
+
+
+
+
+
