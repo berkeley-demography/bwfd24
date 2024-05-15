@@ -37,6 +37,13 @@ Be patient, please. We'll look at how to include migration in a bit :)
 Our approach will be to use some pre-built functions that I (Josh) wrote up.
 
 ```{r}
+# carried over from the first notebook
+library(data.table)
+million = 10^6
+```
+
+
+```{r}
 leslie <- function(x= seq(0, 100, 5), nFx, nLx)
 {
     ## defaults to 5 year age groups
@@ -109,6 +116,7 @@ nKxt <- mydt[, xtabs(nKx ~ x + t)]
 ```
 
 Project Italy without migration from 1995 to 2050
+
 ```{r}
 ## initialization
 x = seq(0, 100, 5)
@@ -134,6 +142,7 @@ consistent with the fertility forecast we saw in Part 1?
 
 
 Let's look at total pop size and compare it to the medium forecast
+
 ```{r}
 Kt_hat = colSums(nKxt_hat) ## what we projected w/o migration
 Kt_medium = colSums(nKxt) ##  what UN projected w/ a bit of migration
