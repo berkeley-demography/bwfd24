@@ -1,0 +1,143 @@
+---
+title: "Solutions to `Replacement Migration' pre-workshop exercises"
+author: "Joshua R. Goldstein and Dennis Feehan"
+output: html_notebook
+---
+
+
+# First set of exercises
+
+_Repeat our above analysis for "South Korea" and answer the following
+questions.
+
+(Hint: Do this by changing the variable "my_location" to "Republic of
+Korea")_
+
+```{r}
+library(data.table) ## the package we use to read in and restructure the data
+million <- 10e6
+
+## restrict to one country
+my_location = "Republic of Korea" ## you can change this to do a different country
+
+## Read in fertility rates
+dt <- fread("./nFx.csv") ## we'll use the name "dt" as a placeholder
+mydt <- dt[Location == my_location] ## restricts data to this country
+nFxt <- mydt[, xtabs(nFx ~ x + t)] ## produces a table with rows age x and columns period t.
+
+## Read in nLx from period life tables 
+dt <- fread("./nLx.csv") ## we'll use the name "dt" as a placeholder
+mydt <- dt[Location == my_location]
+nLxt <- mydt[, xtabs(nLx ~ x + t)] ## produces a table with rows age x and columns period t.
+
+## Read in period age structure, nKx 
+dt <- fread("./nKx.csv") ## we'll use the name "dt" as a placeholder
+## restrict to one country
+mydt <- dt[Location == my_location]
+## and finally we'll create a matrix using the xtabs() functions with formula interface
+nKxt <- mydt[, xtabs(nKx ~ x + t)] ## produces a table with rows age x and columns period t.
+```
+
+
+
+1. How would you describe the history of fertility in South Korea?
+
+a) just like in Italy
+b) higher fertility in past and lower fertility today, compared to Italy
+c) lower fertility always than Italy
+
+```{r}
+TFR_t = colSums(nFxt)*5
+
+plot(names(TFR_t), TFR_t, type = 'o', col = "blue", ylim = c(0, 3))
+grid()
+abline(v = 1995)
+text(x = 1995, y = 2.5, "Replacement migration\n scenarios start\n in 1995", pos = 4)
+```
+
+**It looks like the answer is (b) higher fertility in past and lower fertility today**
+
+
+2. What is Korea's old-age support ratio in 1995. How does it compare
+to Italy's at the same time?
+
+```{r}
+nKx_zero = nKxt[,"1995"]/million
+barplot(nKx_zero, horiz = T, xlab = "pop in millions", ylab = "age")
+title(paste(my_location, "age-structure in 1995"))
+```
+```{r}
+get_old_age_support_ratio <- function(nKx, x = seq(0,100, 5)) 
+{
+  workers = sum(nKx[x %in% 15:64])
+  old = sum(nKx[x > 64])
+  young = sum(nKx[x < 15])
+  oasr = workers/old
+  return(oasr)
+}
+
+oasr_zero = get_old_age_support_ratio(nKx_zero) # we're using "zero" to denote our starting population
+print(oasr_zero)
+```
+
+**South Korea's OASR is about 12.3, which is way higher (about three times higher) than Italy's at the same time**
+
+3. What stable growth rate (and TFR) would be needed to keep that the
+old-age support ratio constant at the level of South Korea in 1995
+(with 1995 survival rates)?
+
+```{r}
+## get the nLx's for 1995, with 5 year age groups for all groups.
+nLx_raw = nLxt[,"1995"] 
+nLx = c(sum(nLx_raw[1:2]), nLx_raw[-(1:2)]) ## this combines the 0- and 1-4 age groups.
+
+## NOTE: had to expand upper limit here from 0.03 to something higher to see
+## a value for r that corresponds to OASR of about 12.3
+r.vec = seq(-.02, .05, .001)
+oasr.vec <- NULL
+x = seq(0, 100, 5)
+for (i in 1:length(r.vec))
+{
+  this_r = r.vec[i]
+  this_oasr = get_old_age_support_ratio(nLx * exp(-x*this_r))
+  ## note: we can leave out b for the ratio because it cancels in the numerator and denominator
+  oasr.vec[i] = this_oasr ## save result
+}  
+print(cbind(r.vec, oasr.vec))
+```
+
+**It looks like we'd need an intrinsic rate of natural increase of about
+3.1 percent to produce the same old-age support ratio over the long-term as
+observed in 1995**
+
+4. How does this level of TFR (needed to maintain the 1995 old-age
+support ratio) compare to South Korea's historical experience?
+
+```{r}
+my_r = 3.1/100
+my_generation = 30
+my_prop_female = 0.4886
+my_approx_TFR = exp(my_r * my_generation)/ my_prop_female
+print(my_approx_TFR)
+```
+
+**South Korea would need a TFR of about 5.2 to maintain the 1995 old-age support ratio;
+this is quite a bit higher than the historical experience of South Korea, at least in
+the time period we investigated above**
+
+5. Why would demographers say that South Korea in 1995 is in the midst
+of its "demographic dividend"? (Hint: look at the age-pyramid).
+
+**Because its age pyramid is heavily weighted towards the economically productive
+middle of the age range, and not towards the young or old.**
+
+> Congratulations! You've reached the end of our first notebook, and
+>  the end of our first set of exercises.
+
+
+
+
+
+
+
+

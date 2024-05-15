@@ -77,7 +77,7 @@ times to predict the answer to our two questions.
 It is helpful to visualize a structured population like this one using a *lifecycle diagram*: 
 
 ```{r pressure, echo=FALSE, out.width = '60%'}
-knitr::include_graphics("lifecycle_diag.png")
+knitr::include_graphics("resources/lifecycle_diag.png")
 ```
 
 
