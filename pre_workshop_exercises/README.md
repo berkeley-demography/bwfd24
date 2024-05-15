@@ -8,9 +8,9 @@ the workshop. There are two exercises, found in two R Markdown notebooks:
 
 We recommend that you complete the exercises in this order.
 
-Note that the folder `solutions` has solutions to the questions that are posed in each
-notebook. Please don't refer to the solutions until you have attempted the questions on your own. 
-
+Please attempt these exercises before attending the workshop!
 We will have Zoom office hours to help discuss these exercises before the workshop starts.
-The letter you receive by email will have more details.
+We will also send a Google Form that will allow you to submit answers to selected questions
+from these two exercises. The letter you receive by email will have more details.
+
 
