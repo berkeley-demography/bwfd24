@@ -180,23 +180,27 @@ Looks like we have the right units, right?
 
 # Analysis of starting age-structure
 
-The UN's approach to replacement migraiton is to calculate the number
+The UN's approach to replacement migration is to calculate the number
 of immigrants that are needed in order to keep some aspect of the
 population constant. They get the most dramatic results when the try
 to keep the age-structure at working and older ages constant (as we'll
 see in Part 2 of our exercise.
 
-But before we get to replacement migration, let's start by look at
-age-structure of the 1995 population that the UN report is trying to
+But before we get to replacement migration, let's start by looking at
+the age-structure of the 1995 population that the UN report is trying to
 keep constant.
 
-Our population is  both sexes, but can still plot it as a kind of 'half-pyramid':
+Our population is both sexes, but we can still plot it as a kind of 'half-pyramid':
 
 ```{r}
 nKx_zero = nKxt[,"1995"]/million
 barplot(nKx_zero, horiz = T, xlab = "pop in millions", ylab = "age")
 title(paste(my_location, "age-structure in 1995"))
 ```
+
+<!--
+Have we defined what a stable population is?
+-->
 
 Does this look like a stable population? Hard to say. It has shrinking
 cohort sizes below about age 30, so it could be close to the stable
@@ -207,7 +211,7 @@ relatively few older people. Remember that fertility rates in the
 
 The UN uses the "potential old-age support ratio" (OASR) as a measure
 of age-structure. This is the ratio of potential workers per elderly
-person, wich they define as the number aged 15-64 per person aged 65+.
+person, which they define as the number aged 15-64 per person aged 65+.
 
 Let's calculate the OASR for this population
 ```{r}
@@ -242,7 +246,9 @@ Our stable age-structure formula (as you will study in days 1 and 2 of the works
 $$
 nCx = b * nLx * exp(-x * r),
 $$
-where 
+
+where:  
+
 * $b$ is the stable birth rate
 * $nLx$ is the person-years lived aged x to x+n
 * $r$ is the intrinsic rate of natural increase.
@@ -269,7 +275,8 @@ So it looks like a stable growth rate $r$ of about 0.7 percent would
 produce the same old-age support ratio over the long-term as we
 observe in 1995.
 
-The usual approximation of the growth rate from the TFR is
+What level of fertility would be needed to produce a stable growth rate of
+about 0.7 percent? The usual approximation of the growth rate from the TFR is
 
 $$
 r \approx \log (TFR * proportionFemale) / generationLength
