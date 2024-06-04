@@ -1,0 +1,210 @@
+---
+title: "Lab: Population projection and stable populations"
+author: "Monica Alexander and Robert Chung"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# run this chunk first!
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+tot = 0
+
+```
+
+In this lab we will do a population projection exercise using the fertility, mortality and population data from the dataset explored in Lab 1: Exploration. We will then compare these results to the growth rate and population structure implied by stable population theory. 
+
+## Read in data
+
+We are using the same dataset from Lab: Exploration, which had fertility, mortality and population data for six different countries. Before using the data, change the units of $_nL_x$ to have a radix of 1 and $_nF_x$ to be births per woman. As you may recall, the original $_nL_x$ had a radix of 100000 (10^5) and the original $_nF_x$ were per thousand, so we'll divide them by 10^5 and 1000, respectively.
+
+```{r}
+d <- read.csv("./projection_data_long.csv")
+# alter the nLx and nFx columns so we dont have to worry about units later
+d <- d %>% 
+  mutate(nLx = nLx/10^5, nFx = nFx/1000)
+```
+
+## Leslie matrices
+
+We need to create a Leslie matrix which contains the fertility and survivorship information in order to project a population forward. Remember that elements in the top line of the Leslie matrix are equal to 
+$$
+_nL_0 \cdot \frac{1}{2}(_nF_x + {_nF_{x+n}}\cdot\frac{_nL_{x+n}}{_nL_x}) \cdot F_{fab}
+$$
+and the subdiagonals are equal to
+$$
+\frac{_nL_{x+n}}{_nL_x}
+$$
+Below is a function that helps to create a Leslie matrix. It takes four inputs: 
+
+- a vector of $_nL_x$ values
+- a vector of $_nF_x$ values
+- the number of age groups. By default this is 10, because we are considering the five year age groups from ages 0--50.
+- The fraction female at birth, which is set to a default value of 0.4886. 
+
+With these inputs, the function `leslie` creates a square matrix with dimension equal to `n_age_groups` and fills in the top row and subdiagonal according to the equations above. 
+
+```{r}
+## function to define Leslie matrix, based on nLx and nFx values
+leslie <- function(nLx,
+                   nFx, 
+                   n_age_groups=10,
+                   ffab = 0.4886){
+  L = matrix(0, nrow = n_age_groups, ncol = n_age_groups)
+  L[1,] = ffab * nLx[1]*(nFx[1:n_age_groups]+nFx[2:(n_age_groups+1)]*nLx[2:(n_age_groups+1)]/nLx[1:n_age_groups])/2 # top row 
+  diag(L[2:n_age_groups,1:(n_age_groups-1)]) = nLx[2:n_age_groups] / nLx[1:(n_age_groups-1)] # subdiagonal
+  return(L)
+}
+```
+
+We can use this function to create a Leslie matrix using the $_nL_x$ and $_nF_x$ values for Australia:
+
+```{r}
+LAA <- leslie(nLx = d$nLx[d$country=="Australia"], 
+              nFx = d$nFx[d$country=="Australia"])
+LAA
+```
+
+We could also use $_nL_x$ and $_nF_x$ values for any combination of the different countries, for example, $_nL_x$ values from Australia and $_nF_x$ from Senegal:
+
+```{r}
+LAS <- leslie(nLx = d$nLx[d$country=="Australia"], 
+              nFx = d$nFx[d$country=="Senegal"])
+```
+
+
+## Population projection
+We can now use the Leslie matrices to project a population forward in time. Let's start with the Australia-only Leslie matrix and project forward Australia's 2015 population 250 years. Note that because we are using five-year age groups, the population projection happens in five-year steps. 
+
+```{r}
+n_age_groups <- 10 # 0-50 in 5yr age groups
+n_projections <- 50 # want to project forward 50*5 = 250 years
+initial_pop <- d$nKx[d$country=="Australia"] # set initial population to be Australia's population in 2015
+# define population matrix K
+K <- matrix(0, nrow = n_age_groups, ncol = n_projections+1)
+K[,1] <- initial_pop[1:n_age_groups]
+
+# do the projection!
+for(i in 2:(n_projections+1)){
+  K[,i] <- LAA%*%K[,i-1] 
+}
+
+head(K[,1:5])
+```
+
+Now we have a matrix of populations by age for Australia projected into the future. We can use these numbers to investigate:
+
+- The total population over time
+- The share of the population in each age group over time
+- The population growth rate over time
+
+First, let's get the matrix `K` in a form that's a bit easier to plot. This involves making `K` into a dataframe in 'long' format, so that every row refers to a different year and age combination. 
+
+```{r}
+# get K in a form that's easier to ggplot
+# make into a dataframem name columns as years and add an age column
+Kdf <- as.data.frame(K)
+colnames(Kdf) <- seq(from = 2015, to = (2015+n_projections*5), by = 5)
+Kdf <- cbind(age = seq(from = 0, to = 45, by = 5), Kdf)
+
+# get in long format and then add proportion of population in each age group
+Klong <- Kdf %>% 
+  gather(year, population, -age) %>%
+  group_by(year) %>%
+  mutate(proportion = population/sum(population), 
+         age = as.factor(age))
+head(Klong)
+```
+Create a data frame that has the total population by year, and calculate the annual growth rate based on the equation
+
+$$
+K(t+5) = K(t) \cdot e^{5R}
+$$
+So
+$$
+R = \frac{1}{5} \cdot \log \frac{K(t+5)}{K(t)}
+$$
+
+```{r}
+# total population by year
+tot_pop <- Klong %>% 
+  group_by(year) %>%
+  summarise(pop = sum(population)) %>%
+  mutate(R = c(NA, log(pop[2:n()]/pop[1:(n()-1)])/5))
+head(tot_pop)
+```
+
+Now we can plot total population, growth rate, and proportion in each age group over time.  
+
+```{r}
+
+# plot total population over time 
+ggplot(data = tot_pop, aes(x = year, y = pop, group = 1)) +
+  geom_point() + geom_line()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Total population over time")
+
+# plot growth rate over time
+ggplot(data = tot_pop, aes(x = year, y = R, group = 1)) +
+  geom_point() + geom_line()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Growth rate of population over time")
+
+# plot proportion in each age group over time
+ggplot(data = Klong, aes(x = year, y = proportion, group = age, color = age)) +
+  geom_point() + geom_line()+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Proportion of population in each age group over time")
+```
+
+
+## Stable population quantities 
+
+We can do an eigen-decomposition of the Leslie Matrix to get the values of the stable growth rate $r$ and stable population age structure. If we compare these values to the values of the growth rate $R$ and population age structure in the final projection period, you can see that they are very similar. 
+
+```{r}
+eigen.AA <- eigen(LAA)
+r.AA <- log(Re(eigen.AA$value[1]))/5 
+v <- Re(eigen.AA$vectors[,1])
+k.AA <- v/sum(v)
+
+# compare stable population rate and rate at end of projection period
+cbind(stable = r.AA,  proj = tot_pop$R[nrow(tot_pop)])
+
+# compare stable population age distribution and age distribution at end of projection period
+cbind(stable = k.AA, proj = Klong$proportion[Klong$year==(2015+n_projections*5)])
+
+```
+
+```{r}
+ages <- seq(0, 45, by = 5)
+ggplot(data = data.frame(age = ages, proportion = k.AA), aes(x = age, y = proportion))+
+  geom_bar(stat = 'identity')+
+  coord_flip()+
+  ggtitle("Stable age population structure")
+```
+
+
+## Exercises
+
+1. Would you expect a population projection for Niger to converge to the stable properties more quickly or slowly than Australia? Why? Repeat the projection exercise for Niger to see what happens.
+2. Investigate how different fertility and mortality situations effect the stable population characteristics. Obtain eigendecompositions of different combinations of high and low fertility/mortality countries and look at the implied growth rates and population age structures. 
+
+
+## Questions to think about and check your understanding
+
+**Q1. What does Australia's stable growth rate tell you about Australia's NRR?**
+
+**Q2. True or False: If everything else remained the same, doubling the age-specific fertility rates at every age would double the Total Fertility Rate.**
+
+**Q3. True or False: If everything else remained the same, doubling the age-specific fertility rates at every age would double the growth rate r.**
+
+**Q4. The growth rate r obtained from the eigendecomposition of the Leslie matrix can be interpreted as:**
+
+A. The current growth rate of the population
+
+B. The current growth rate of the population, ignoring migration
+
+C. The stable growth rate of a population; i.e. the growth rate it will converge to if fertility and mortality rates remained constant over time.
+
+
